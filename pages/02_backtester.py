@@ -12,6 +12,64 @@ from bess.metrics import efficiency_gap, daily_summary, payback_period
 
 st.set_page_config(page_title="Backtester", page_icon="📈", layout="wide")
 
+@st.cache_data
+def load_zones():
+    return get_zones()
+
+def render_sidebar():
+    st.sidebar.header("Battery Parameters")
+    
+    # API Status Indicator
+    try:
+        zones = load_zones()
+        st.sidebar.success("✓ API connected")
+    except Exception as e:
+        st.sidebar.error(f"✗ API error: {e}")
+        zones = ["DE"] # Fallback just so the UI doesn't completely crash
+
+    # Zone Selector
+    zone = st.sidebar.selectbox(
+        "Market Zone", 
+        options=zones, 
+        index=zones.index("GB") if "GB" in zones else 0
+    )
+    st.session_state["zone"] = zone
+    
+    # Battery capacity
+    e_max_mwh = st.sidebar.number_input(
+        "Battery capacity (MWh)", 
+        min_value=0.1, max_value=1000.0, value=1.0, step=0.1
+    )
+    st.session_state["e_max_mwh"] = e_max_mwh
+    
+    # Power rating
+    p_max_mw = st.sidebar.number_input(
+        "Power rating (MW)", 
+        min_value=0.1, max_value=1000.0, value=0.5, step=0.1
+    )
+    st.session_state["p_max_mw"] = p_max_mw
+    
+    # Efficiency
+    eff_pct = st.sidebar.slider(
+        "Round-trip efficiency (%)", 
+        min_value=50, max_value=100, value=90, step=1
+    )
+    st.session_state["roundtrip_eff"] = eff_pct / 100.0
+    
+    # Degradation Cost
+    deg_cost = st.sidebar.number_input(
+        "Degradation cost (£/MWh)", 
+        min_value=0.0, value=5.0, step=0.5
+    )
+    st.session_state["deg_cost_per_mwh"] = deg_cost
+    
+    # MILP Toggle
+    enforce_milp = st.sidebar.checkbox(
+        "Enforce no simultaneous charge/discharge",
+        value=False
+    )
+    st.session_state["enforce_new_milp"] = enforce_milp  # Or standard simple modeling
+
 def load_historical_prices(zone, start_date, end_date):
     """Fetch cached prices."""
     return get_prices_cached(zone, start_date, end_date)
@@ -24,6 +82,7 @@ def load_ml_model(prices):
 def main():
     st.title("📈 Backtester")
     st.markdown("Run the optimiser over an extended historical period to measure long-term value creation.")
+    render_sidebar()
     
     # 1. Check dependencies
     required_keys = ["zone", "e_max_mwh", "p_max_mw", "roundtrip_eff", "deg_cost_per_mwh"]
