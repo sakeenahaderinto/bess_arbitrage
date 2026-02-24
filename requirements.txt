@@ -1,0 +1,15 @@
+pyomo
+highspy
+matplotlib
+pandas
+requests
+python-dotenv
+pyarrow
+lightgbm
+scikit-learn
+streamlit==1.43.0
+altair==4.2.2
+plotly
+pytest
+setuptools
+-e .
