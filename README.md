@@ -4,7 +4,7 @@ An analytical modelling and forecasting suite for evaluating Battery Energy Stor
 
 Grid-scale batteries generate revenue by shifting energy temporally — charging during periods of excess renewable generation when prices are low, and discharging during peak demand when prices are high. This project uses real Day-Ahead Market (DAM) prices to calculate theoretical maximum revenue and compare it against naive and machine learning forecasting strategies.
 
-[Streamlit Dashboard link](https://bessarbitrage.streamlit.app/)
+[Streamlit Dashboard link](https://bessarbitragedemo.streamlit.app/)
 
 ## Features
 
