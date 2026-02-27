@@ -28,7 +28,7 @@ def test_backtest_output_shape_and_columns():
     assert len(df) == 7, "Output DataFrame should have exactly 7 rows"
     
     # Assert Test 2
-    expected_cols = {"profit", "throughput_MWh", "n_cycles", "avg_spread"}
+    expected_cols = {"profit", "throughput_MWh", "active_hours", "equiv_full_cycles", "avg_spread"}
     assert expected_cols.issubset(df.columns), f"Should contain all expected columns, got {df.columns}"
 
 def test_backtest_profit_positive_on_favourable_prices():

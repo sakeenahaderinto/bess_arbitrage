@@ -31,7 +31,7 @@ def render_sidebar():
     zone = st.sidebar.selectbox(
         "Market Zone", 
         options=zones, 
-        index=zones.index("GB") if "GB" in zones else 0
+        index=zones.index("DE") if "DE" in zones else 0
     )
     st.session_state["zone"] = zone
     
@@ -117,8 +117,11 @@ def main():
                 options=["Naive (lag-24)", "Naive (7-day avg)", "ML Model"],
                 horizontal=True
             )
+        if model_selection == "ML Model":
+            st.caption("⏱ ML backtests may take 1-2 minutes depending on date range — the model trains on your full history and runs iterative inference for each day.")
             
         submitted = st.form_submit_button("Run Backtest")
+        
         
     if submitted:
         if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -240,12 +243,20 @@ def main():
             st.plotly_chart(fig1, use_container_width=True)
             
         with chart_col2:
-            st.markdown(f"**Monthly P&L ({currency_symbol})**")
-            # Resample to monthly sums
+            # Determine if we should show Daily or Monthly P&L
             df_fc = df_fc.copy()
             df_fc.index = pd.to_datetime(df_fc.index)
-            df_monthly = df_fc['profit'].resample('ME').sum()
-            fig2 = go.Figure(data=[go.Bar(x=df_monthly.index.strftime('%Y-%B'), y=df_monthly.values)])
+            num_days = len(df_fc)
+            
+            if num_days <= 31:
+                st.markdown(f"**Daily P&L ({currency_symbol})**")
+                df_resampled = df_fc['profit'].resample('D').sum()
+                fig2 = go.Figure(data=[go.Bar(x=df_resampled.index.strftime('%Y-%m-%d'), y=df_resampled.values)])
+            else:
+                st.markdown(f"**Monthly P&L ({currency_symbol})**")
+                df_resampled = df_fc['profit'].resample('ME').sum()
+                fig2 = go.Figure(data=[go.Bar(x=df_resampled.index.strftime('%Y-%B'), y=df_resampled.values)])
+                
             fig2.update_layout(height=400)
             fig2.update_xaxes(tickangle=45)
             st.plotly_chart(fig2, use_container_width=True)
@@ -263,10 +274,10 @@ def main():
         
         with bw1:
             st.write("Top 5 Profitable Days")
-            st.dataframe(sorted_days.head(5)[["date", "profit", "throughput_MWh", "n_cycles", "avg_spread"]], use_container_width=True)
+            st.dataframe(sorted_days.head(5)[["date", "profit", "throughput_MWh", "active_hours", "avg_spread"]], use_container_width=True)
         with bw2:
             st.write("Bottom 5 Days")
-            st.dataframe(bottom_5[["date", "profit", "throughput_MWh", "n_cycles", "avg_spread"]].sort_values('profit'), use_container_width=True)
+            st.dataframe(bottom_5[["date", "profit", "throughput_MWh", "active_hours", "avg_spread"]].sort_values('profit'), use_container_width=True)
             
         # 7. CSV Export
         st.markdown("---")

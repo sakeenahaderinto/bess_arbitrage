@@ -128,6 +128,11 @@ def main():
 
         st.subheader("Comparison Results")
         
+        st.info("**Note:** revenues and price volatility are shown in each zone's local currency "
+                "(£ for GB, € for eurozone markets) and are not directly comparable across zones "
+                "without currency conversion. Use this comparison to understand relative market "
+                "structure, not absolute revenue differences.")
+        
         col_chart1, col_chart2 = st.columns(2)
         
         with col_chart1:
@@ -152,7 +157,7 @@ def main():
                 color="Zone",
                 labels={
                     "Price Volatility (Spread Std Dev)": "Daily Price Spread Std Dev (local currency/MWh)",
-                    "Annualised Revenue": "Annualised Revenue (£)"
+                    "Annualised Revenue": "Annualised Revenue (local currency)"
                 }
             )
             fig2.update_traces(textposition='top center', marker=dict(size=12))

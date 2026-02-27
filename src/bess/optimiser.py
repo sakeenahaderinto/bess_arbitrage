@@ -163,7 +163,7 @@ def battery_solve_arbitrage(
 
         row = {
             "t": t,
-            "price_$perMWh": price,
+            "price_per_mwh": price,
             "p_charge_MW": p_c,
             "p_discharge_MW": p_d,
             "soc_start_MWh": soc_start,
@@ -187,7 +187,7 @@ def battery_solve_arbitrage(
 def plot_solution(df: pd.DataFrame, title: str = "Battery arbitrage (perfect foresight)") -> plt.Figure:
     fig, ax = plt.subplots(3, 1, sharex=True, figsize=(10, 7))
 
-    ax[0].plot(df.index, df["price_$perMWh"], marker="o")
+    ax[0].plot(df.index, df["price_per_mwh"], marker="o")
     ax[0].set_ylabel("Price ($/MWh)")
     ax[0].set_title(title)
 

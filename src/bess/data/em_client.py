@@ -10,7 +10,6 @@ load_dotenv()
 # Electricitymaps. Scoped to Europe to keep the app focused — the full global
 # zone list would add noise without adding value for this project.
 # Source: Electricitymaps day-ahead price availability table.
-# Update manually if coverage changes.
 EUROPEAN_ZONES = [
     "AT", "AX", "BE", "BG", "CH", "CZ", "DE",
     "DK-BHM", "DK-DK1", "DK-DK2", "EE", "ES", "FI", "FR",
@@ -58,8 +57,7 @@ def get_zones() -> list[str]:
     """
     Returns the hardcoded list of supported European zone codes.
 
-    No API call is made — this is purely a local lookup.
-    Used by the Streamlit sidebar to populate the zone dropdown.
+    Local lookup used by Streamlit to populate the zone dropdowns.
     """
     return EUROPEAN_ZONES
 
@@ -103,7 +101,7 @@ def get_historical_prices(zone: str, start_date: str, end_date: str, timeout: in
     headers = {"auth-token": api_key}
     all_data = []
 
-    # Loop in 10-day chunks — this is the API's maximum window per request
+    # Loop in 10-day chunks — the API's maximum window per request
     current_start = start_dt
     while current_start < end_dt:
         current_end = min(current_start + pd.Timedelta(days=10), end_dt)

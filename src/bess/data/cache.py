@@ -40,7 +40,7 @@ def get_prices_cached(zone: str, start_date: str, end_date: str, force_refresh: 
     return series
 
 if __name__ == "__main__":
-    # Simple manual verification script
+    # Little manual verification script
     zone = "DE"
     start = "2024-01-01"
     end = "2024-01-07"

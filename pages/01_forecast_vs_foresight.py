@@ -32,7 +32,7 @@ def render_sidebar():
     zone = st.sidebar.selectbox(
         "Market Zone", 
         options=zones, 
-        index=zones.index("GB") if "GB" in zones else 0
+        index=zones.index("DE") if "DE" in zones else 0
     )
     st.session_state["zone"] = zone
     
@@ -104,8 +104,7 @@ def run_single_day_scenario(prices, target_date, forecast_fn, battery_params, ml
         df_dispatch['actual_price'] = actual_prices.values
         df_dispatch['forecast_price'] = solve_prices.values
         
-        # Recalculate actual profit by evaluating the forecast dispatch against real prices.
-        # This is critical for evaluating forecast performance.
+        # Recalculate actual profit by evaluating the forecast dispatch against real prices. Critical for evaluating forecast performance
         actual_revenue = (df_dispatch["p_discharge_MW"] * df_dispatch["actual_price"]).sum()
         actual_cost = (df_dispatch["p_charge_MW"] * df_dispatch["actual_price"]).sum()
         realised_profit = actual_revenue - actual_cost
@@ -120,14 +119,14 @@ def main():
     st.title("⚖️ Forecast vs Perfect Foresight")
     render_sidebar()
     
-    # 1. Check dependencies
+    # Check dependencies
     required_keys = ["zone", "e_max_mwh", "p_max_mw", "roundtrip_eff", "deg_cost_per_mwh"]
     for key in required_keys:
         if key not in st.session_state:
             st.warning("Sidebar parameters missing. Please visit the main page first.")
             return
             
-    # 2. Setup standard UI
+    # Setup standard UI
     col1, col2 = st.columns([1, 2])
     with col1:
         target_date = st.date_input("Select Historical Date", value=pd.to_datetime("2024-06-08"))
@@ -150,8 +149,7 @@ def main():
         }
         forecast_fn, lookback_days = forecast_fn_map[model_selection]
         
-        # history for the forecast model. 7 days lookback means we need 
-        # to fetch starting from target_date - 7 days.
+        # history for the forecast model. 7 days lookback means we need to fetch starting from target_date - 7 days.
         start_fetch = (target_date - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
         
         with st.spinner(f"Fetching data and solving for {target_date_str}..."):
@@ -210,6 +208,10 @@ def main():
             else:
                 st.metric("Efficiency Gap", "N/A")
                 
+        st.caption("Efficiency Gap measures how much of the theoretically available arbitrage "
+                   "value your forecast captured. A value of 85% means your forecast recovered "
+                   "85p of every £1 that was available under perfect market knowledge.")
+                
         # Charts
         st.markdown("### Dispatch Comparison")
         chart_col1, chart_col2 = st.columns(2)
@@ -225,15 +227,17 @@ def main():
                 fig.add_trace(go.Scatter(x=df.index, y=df['forecast_price'], name="Forecast Price", line=dict(color='orange', width=2, dash='dot')), secondary_y=True)
                 
             fig.update_layout(title=title, barmode='relative', height=400, legend=dict(orientation="h", y=-0.2))
-            fig.update_yaxes(title_text="Power (MW)", secondary_y=False)
-            fig.update_yaxes(title_text="Price", secondary_y=True)
+            fig.update_yaxes(title_text="Power (MW) — positive = discharge, negative = charge", secondary_y=False)
+            fig.update_yaxes(title_text="Price (£/MWh)", secondary_y=True)
             return fig
             
         with chart_col1:
             st.plotly_chart(plot_dispatch(df_pf, "Perfect Foresight"), use_container_width=True)
+            st.caption("Green bars = discharge (selling), Blue bars = charge (buying)")
             
         with chart_col2:
             st.plotly_chart(plot_dispatch(df_fc, f"Forecast: {model_selection}", forecast_overlay=True), use_container_width=True)
+            st.caption("Green bars = discharge (selling), Blue bars = charge (buying)")
             
         # Table of decisions
         st.markdown("### Hourly Detailed Breakdown")
@@ -248,14 +252,29 @@ def main():
             hour_idx = df_pf.index[i]
             breakdown_data.append({
                 "Hour": hour_idx.strftime("%H:00"),
-                "Actual Price": df_pf.iloc[i]['actual_price'],
-                "Forecast Price": df_fc.iloc[i]['forecast_price'],
-                "Price Error": df_fc.iloc[i]['forecast_price'] - df_pf.iloc[i]['actual_price'],
+                "Actual Price": round(df_pf.iloc[i]['actual_price'], 2),
+                "Forecast Price": round(df_fc.iloc[i]['forecast_price'], 2),
+                "Price Error": round(df_fc.iloc[i]['forecast_price'] - df_pf.iloc[i]['actual_price'], 2),
                 "PF Action": action_str(df_pf.iloc[i]['p_charge_MW'], df_pf.iloc[i]['p_discharge_MW']),
                 "Forecast Action": action_str(df_fc.iloc[i]['p_charge_MW'], df_fc.iloc[i]['p_discharge_MW'])
             })
             
-        st.dataframe(pd.DataFrame(breakdown_data), use_container_width=True)
+        breakdown_df = pd.DataFrame(breakdown_data)
+        
+        # Highlight top 5 absolute price errors
+        top_5_indices = breakdown_df["Price Error"].abs().nlargest(5).index
+        def highlight_top_errors(row):
+            return ['background-color: #fff3cd' if row.name in top_5_indices else ''] * len(row)
+            
+        styled_df = breakdown_df.style.apply(highlight_top_errors, axis=1)
+        st.dataframe(styled_df, use_container_width=True)
+        
+        st.download_button(
+            label="Download Hourly Breakdown as CSV",
+            data=breakdown_df.to_csv(index=False),
+            file_name=f"hourly_breakdown_{target_date_str}.csv",
+            mime="text/csv"
+        )
 
 if __name__ == "__main__":
     main()
