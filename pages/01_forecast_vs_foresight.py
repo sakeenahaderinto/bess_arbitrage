@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 from datetime import timedelta
 
 from bess.data.cache import get_prices_cached
+from bess.data.em_client import get_zones
 from bess.forecast.naive import forecast_lag24, forecast_rolling7
 from bess.forecast.ml import train_model, forecast_ml
 from bess.optimiser import battery_solve_arbitrage
@@ -173,6 +174,7 @@ def main():
             }
             
             ml_model = None
+            st.write(f"DEBUG: forecast_fn={forecast_fn.__name__}, ml_model={ml_model is not None}, target={target_date}")
             if forecast_fn == forecast_ml:
                 ml_model = load_ml_model(prices)
             
