@@ -77,9 +77,14 @@ def load_historical_prices(zone, start_date, end_date):
     return get_prices_cached(zone, start_date, end_date)
 
 def load_ml_model(prices):
-    """Trains the ML model once per run and caches it in memory."""
-    with st.spinner("Training LightGBM model on historical data..."):
-        return train_model(prices)
+    try:
+        with st.spinner("Training LightGBM model on historical data..."):
+            model = train_model(prices)
+            st.write(f"DEBUG: model trained, best_iteration={model.best_iteration}")
+            return model
+    except Exception as e:
+        st.error(f"Training failed: {type(e).__name__}: {e}")
+        return None
 
 def run_single_day_scenario(prices, target_date, forecast_fn, battery_params, ml_model=None):
     """Runs a single day scenario either with perfect foresight (forecast_fn=None) or a forecast model."""
