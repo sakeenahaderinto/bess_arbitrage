@@ -1,5 +1,6 @@
 
 import streamlit as st
+import hashlib
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -76,11 +77,11 @@ def load_historical_prices(zone, start_date, end_date):
     """Fetch cached prices."""
     return get_prices_cached(zone, start_date, end_date)
 
+@st.cache_resource(hash_funcs={pd.Series: lambda s: hashlib.md5(pd.util.hash_pandas_object(s).values).hexdigest()})
 def load_ml_model(prices):
     try:
         with st.spinner("Training LightGBM model on historical data..."):
             model = train_model(prices)
-            st.write(f"DEBUG: model trained, best_iteration={model.best_iteration}")
             return model
     except Exception as e:
         st.error(f"Training failed: {type(e).__name__}: {e}")
@@ -178,7 +179,6 @@ def main():
             }
             
             ml_model = None
-            st.write(f"DEBUG: forecast_fn={forecast_fn.__name__}, ml_model={ml_model is not None}, target={target_date}")
             if forecast_fn == forecast_ml:
                 ml_model = load_ml_model(prices)
             
