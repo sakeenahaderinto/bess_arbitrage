@@ -76,7 +76,6 @@ def load_historical_prices(zone, start_date, end_date):
     """Fetch cached prices."""
     return get_prices_cached(zone, start_date, end_date)
 
-@st.cache_resource
 def load_ml_model(prices):
     """Trains the ML model once per run and caches it in memory."""
     with st.spinner("Training LightGBM model on historical data..."):
