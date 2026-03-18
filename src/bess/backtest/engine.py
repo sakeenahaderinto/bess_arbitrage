@@ -1,3 +1,4 @@
+import gc
 import logging
 import pandas as pd
 from typing import Callable
@@ -11,8 +12,9 @@ FAILED_DAY = {
     "active_hours": 0,
     "equiv_full_cycles": 0.0,
     "avg_spread": 0.0,
-    "solve_failed": True
+    "solve_failed": True,
 }
+
 
 def run_backtest(
     prices: pd.Series,
@@ -36,6 +38,8 @@ def run_backtest(
         battery_params: Dict of parameters for `battery_solve_arbitrage`.
         progress_callback: Optional function `(current_day_int, total_days_int)`
                            to report progress back to the caller/UI.
+        start_date: Optional date string 'YYYY-MM-DD'. If provided, only dates
+                    on or after this date are included in the backtest.
 
     Returns:
         pd.DataFrame: A row per day with performance metrics.
@@ -43,7 +47,7 @@ def run_backtest(
     if prices.empty:
         return pd.DataFrame()
 
-    # Convert to UTC for consistent day boundaries
+    # Convert to UTC for consistent day boundaries.
     if prices.index.tz is None:
         prices.index = prices.index.tz_localize("UTC")
     else:
@@ -52,19 +56,20 @@ def run_backtest(
     # Enforce strict hourly grid once on the full series before the loop.
     # This prevents asfreq('h') inside forecast functions from reindexing
     # a growing slice on every iteration, which is O(N) per day.
-    prices = prices.asfreq('h')
+    prices = prices.asfreq("h")
 
     unique_dates = sorted(list(set(prices.index.date)))
 
     if start_date:
         backtest_start = pd.to_datetime(start_date).date()
-        unique_dates = [d for d in unique_dates if d>= backtest_start]
+        unique_dates = [d for d in unique_dates if d >= backtest_start]
 
     results = []
     total_days = len(unique_dates)
 
     for i, current_date in enumerate(unique_dates):
         date_str = current_date.strftime("%Y-%m-%d")
+        m = None  # ensure m is always defined for the finally block
 
         try:
             actual_prices = prices.loc[date_str]
@@ -75,9 +80,11 @@ def run_backtest(
                 logger.warning(f"Skipping {date_str} due to NaN prices.")
                 continue
 
-            # Skip incomplete days — DST transitions can produce 23 or 25 hour days
+            # Skip incomplete days — DST transitions can produce 23 or 25 hour days.
             if len(actual_prices) != 24:
-                logger.warning(f"Skipping {date_str} due to incomplete data ({len(actual_prices)} hours).")
+                logger.warning(
+                    f"Skipping {date_str} due to incomplete data ({len(actual_prices)} hours)."
+                )
                 continue
 
             if forecast_fn is None:
@@ -85,7 +92,7 @@ def run_backtest(
             else:
                 forecast_series = forecast_fn(prices, date_str)
 
-                # Validate forecast length and date alignment
+                # Validate forecast length and date alignment.
                 if len(forecast_series) != 24 or forecast_series.index[0].date() != current_date:
                     logger.warning(
                         f"Forecast for {date_str} returned invalid shape or date "
@@ -94,39 +101,44 @@ def run_backtest(
                     results.append({"date": current_date, **FAILED_DAY})
                     continue
 
-                # Validate forecast has no NaN values
+                # Validate forecast has no NaN values.
                 if forecast_series.isnull().any():
-                    logger.warning(f"Forecast for {date_str} contains NaN values. Marking as failed.")
+                    logger.warning(
+                        f"Forecast for {date_str} contains NaN values. Marking as failed."
+                    )
                     results.append({"date": current_date, **FAILED_DAY})
                     continue
 
                 solve_prices = forecast_series.tolist()
 
-            logger.info(f"Solving {date_str} with prices: min={min(solve_prices):.2f} max={max(solve_prices):.2f}")
+            logger.info(
+                f"Solving {date_str} with prices: "
+                f"min={min(solve_prices):.2f} max={max(solve_prices):.2f}"
+            )
 
-            _, _, df_dispatch, profit = battery_solve_arbitrage(solve_prices, **battery_params)
+            m, _, df_dispatch, profit = battery_solve_arbitrage(solve_prices, **battery_params)
 
             logger.info(f"Solved {date_str}: profit={profit:.2f}")
 
             # Recalculate realised profit against actual prices when using a forecast.
-            # The optimiser's returned profit is calculated against forecast prices,
-            # not actual prices as this is what would really have been earned in the market.
+            # The optimiser's returned profit is calculated against forecast prices;
+            # realised profit is what would actually have been earned in the market.
             if forecast_fn is not None:
                 dt_hours = battery_params.get("dt_hours", 1.0)
                 profit = (
-                    (df_dispatch["p_discharge_MW"] * actual_prices.values).sum() -
-                    (df_dispatch["p_charge_MW"] * actual_prices.values).sum()
+                    (df_dispatch["p_discharge_MW"] * actual_prices.values).sum()
+                    - (df_dispatch["p_charge_MW"] * actual_prices.values).sum()
                 ) * dt_hours
 
             throughput = df_dispatch["throughput_MWh"].sum()
 
-            # Counts hours where net_MW is non-zero as a measure of activity, not true cycle count
+            # Counts hours where net_MW is non-zero as a measure of activity.
             active_hours = int((df_dispatch["net_MW"] != 0).sum())
 
-            # Equivalent full cycles: total throughput divided by twice the battery capacity
+            # Equivalent full cycles: total throughput divided by twice the battery capacity.
             equiv_full_cycles = throughput / (2 * battery_params["e_max_mwh"])
 
-            # Average spread weighted by energy (MWh), not power (MW)
+            # Average spread weighted by energy (MWh), not power (MW).
             dt_hours = battery_params.get("dt_hours", 1.0)
             charge_energy_mwh = (df_dispatch["p_charge_MW"] * dt_hours).sum()
             discharge_energy_mwh = (df_dispatch["p_discharge_MW"] * dt_hours).sum()
@@ -151,7 +163,7 @@ def run_backtest(
                 "active_hours": active_hours,
                 "equiv_full_cycles": equiv_full_cycles,
                 "avg_spread": avg_spread,
-                "solve_failed": False
+                "solve_failed": False,
             })
 
         except PermissionError:
@@ -159,6 +171,15 @@ def run_backtest(
         except Exception as e:
             logger.error(f"Solve failed for {date_str}: {e}")
             results.append({"date": current_date, **FAILED_DAY})
+
+        finally:
+            # Explicitly release the Pyomo ConcreteModel after every day.
+            # Pyomo's internal constraint and variable dicts can retain memory
+            # longer than expected if the model object is only garbage-collected
+            # implicitly. Doing this in finally ensures cleanup even on exceptions.
+            if m is not None:
+                del m
+            gc.collect()
 
         if progress_callback:
             progress_callback(i + 1, total_days)

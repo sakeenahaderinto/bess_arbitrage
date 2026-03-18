@@ -1,6 +1,18 @@
+import gc
 import lightgbm as lgb
 import pandas as pd
 import numpy as np
+
+# Canonical feature column order, defined once at module level.
+# This eliminates the need to call build_features() just to get column names
+# during iterative inference — which was rebuilding a full ~8,760-row DataFrame
+# on every forecast day in the backtest loop.
+FEATURE_COLS = [
+    "hour", "dayofweek", "month",
+    "lag_1h", "lag_24h", "lag_48h", "lag_168h",
+    "rolling_24h_mean", "rolling_24h_std",
+    "rolling_7d_same_hour_mean",
+]
 
 
 def build_features(prices: pd.Series) -> pd.DataFrame:
@@ -17,11 +29,13 @@ def build_features(prices: pd.Series) -> pd.DataFrame:
     Returns:
         pd.DataFrame with one row per hour and one column per feature,
         plus a 'price' column representing the target variable.
+        Column order matches FEATURE_COLS (plus 'price').
     """
     # Defensively ensure chronological contiguous hourly data.
-    # asfreq('h') enforces a strict hourly grid which meanst that any missing hours become NaN
-    # rather than silently causing shift(24) to point to the wrong timestamp.
-    prices = prices.sort_index().asfreq('h')
+    # asfreq('h') enforces a strict hourly grid which means that any missing
+    # hours become NaN rather than silently causing shift(24) to point to the
+    # wrong timestamp.
+    prices = prices.sort_index().asfreq("h")
     df = pd.DataFrame({"price": prices})
 
     # Calendar/Time features
@@ -54,7 +68,9 @@ def build_features(prices: pd.Series) -> pd.DataFrame:
     lags = [df["price"].shift(24 * d) for d in range(1, 8)]
     df["rolling_7d_same_hour_mean"] = pd.concat(lags, axis=1).mean(axis=1)
 
-    return df
+    # Enforce FEATURE_COLS order so the returned DataFrame always matches
+    # what the model expects, regardless of future column additions.
+    return df[["price"] + FEATURE_COLS]
 
 
 def train_model(historical_prices: pd.Series) -> lgb.Booster:
@@ -94,10 +110,9 @@ def train_model(historical_prices: pd.Series) -> lgb.Booster:
     val = df.iloc[split_idx:]
 
     target = "price"
-    features = [c for c in df.columns if c != target]
 
-    train_data = lgb.Dataset(train[features], label=train[target])
-    val_data = lgb.Dataset(val[features], label=val[target], reference=train_data)
+    train_data = lgb.Dataset(train[FEATURE_COLS], label=train[target])
+    val_data = lgb.Dataset(val[FEATURE_COLS], label=val[target], reference=train_data)
 
     # Conservative defaults suitable for a moderate-sized tabular regression problem.
     # seed ensures repeatable results when bagging or other randomness is enabled.
@@ -107,7 +122,7 @@ def train_model(historical_prices: pd.Series) -> lgb.Booster:
         "learning_rate": 0.05,
         "num_leaves": 31,
         "verbose": -1,
-        "seed": 42
+        "seed": 42,
     }
 
     booster = lgb.train(
@@ -115,8 +130,12 @@ def train_model(historical_prices: pd.Series) -> lgb.Booster:
         train_data,
         num_boost_round=500,
         valid_sets=[val_data],
-        callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False)]
+        callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False)],
     )
+
+    # Free the training datasets from memory — they are not needed after training.
+    del train_data, val_data, train, val, df
+    gc.collect()
 
     return booster
 
@@ -131,9 +150,9 @@ def forecast_ml(model: lgb.Booster, historical_prices: pd.Series, forecast_date:
     the forecast day — which hasn't happened yet — we predict hour 0 first, feed
     that prediction back as lag_1h for hour 1, and continue iteratively.
 
-    Feature rows are built incrementally rather than rebuilding
-    the full feature matrix on every iteration. This makes the function 
-    suitable for production use cases where inference latency matters.
+    Feature rows are built incrementally (O(1) per step) using the module-level
+    FEATURE_COLS constant rather than reconstructing the full feature DataFrame
+    on every call, which previously cost one ~8,760-row allocation per forecast day.
 
     Args:
         model: Trained lgb.Booster returned by train_model.
@@ -154,7 +173,6 @@ def forecast_ml(model: lgb.Booster, historical_prices: pd.Series, forecast_date:
     # Exclude the target date and anything after it — strict no-lookahead rule.
     past_prices = historical_prices[historical_prices.index.date < target_date_dt].copy()
 
-
     if len(past_prices) < 168:
         # Not enough history to construct the 168h lag feature.
         # Pass past_prices (not historical_prices) to preserve the no-lookahead rule.
@@ -166,11 +184,12 @@ def forecast_ml(model: lgb.Booster, historical_prices: pd.Series, forecast_date:
     tz = historical_prices.index.tz
     target_idx = pd.date_range(start=forecast_date, periods=24, freq="h", tz=tz)
 
-    # Build features once on past_prices to get the canonical column order.
-    # We use the column names from this call to ensure pred_features always
-    # matches the feature order the model was trained on.
-    initial_features_df = build_features(past_prices)
-    feature_cols = [c for c in initial_features_df.columns if c != "price"]
+    # Pre-allocate 24 NaN slots for the forecast window in one concat rather than
+    # growing past_prices with 24 individual .loc assignments inside the loop.
+    # Each .loc assignment to a new index key triggers a Series reallocation;
+    # doing 24 of them per day across 365 days = ~8,760 unnecessary reallocations.
+    forecast_slots = pd.Series(np.nan, index=target_idx)
+    past_prices = pd.concat([past_prices, forecast_slots])
 
     for i in range(24):
         current_ts = target_idx[i]
@@ -185,8 +204,9 @@ def forecast_ml(model: lgb.Booster, historical_prices: pd.Series, forecast_date:
         # Lag features
         # lag_1h uses the previous prediction to propagate forecast uncertainty
         # forward correctly. For hour 0, there is no prior prediction so we use
-        # the last known price.
-        lag_1h = predictions[-1] if i > 0 else past_prices.iloc[-1]
+        # the last known historical price (iloc[-25] because the 24 NaN slots
+        # are now appended at the end).
+        lag_1h = predictions[-1] if i > 0 else past_prices.iloc[-(25 - i)]
         lag_24h = past_prices.loc[current_ts - pd.Timedelta(hours=24)]
         lag_48h = past_prices.loc[current_ts - pd.Timedelta(hours=48)]
         lag_168h = past_prices.loc[current_ts - pd.Timedelta(hours=168)]
@@ -196,13 +216,14 @@ def forecast_ml(model: lgb.Booster, historical_prices: pd.Series, forecast_date:
         # made so far, ensuring the window always contains exactly 24 values and
         # reflects the most recent available information at each step.
         if i == 0:
-            window_24h = past_prices.iloc[-24:].values
+            window_24h = past_prices.iloc[-(24 + 24):-(24)].values  # last 24 known prices
         else:
-            window_24h = np.concatenate([past_prices.iloc[-(24 - i):].values, predictions])
+            known = past_prices.iloc[-(24 + 24 - i):-(24)].values
+            window_24h = np.concatenate([known, predictions])
 
-        rolling_24h_mean = np.mean(window_24h)
+        rolling_24h_mean = float(np.mean(window_24h))
         # ddof=1 matches pandas rolling.std() default for an unbiased estimate
-        rolling_24h_std = np.std(window_24h, ddof=1)
+        rolling_24h_std = float(np.std(window_24h, ddof=1))
 
         # 7-day same-hour mean
         # Average the same hour across the 7 prior days for a robust structural baseline.
@@ -210,7 +231,7 @@ def forecast_ml(model: lgb.Booster, historical_prices: pd.Series, forecast_date:
             past_prices.loc[current_ts - pd.Timedelta(hours=24 * d)]
             for d in range(1, 8)
         ]
-        rolling_7d_same_hour_mean = np.mean(same_hour_lags)
+        rolling_7d_same_hour_mean = float(np.mean(same_hour_lags))
 
         # --- Predict ---
         row_dict = {
@@ -223,24 +244,22 @@ def forecast_ml(model: lgb.Booster, historical_prices: pd.Series, forecast_date:
             "lag_168h": lag_168h,
             "rolling_24h_mean": rolling_24h_mean,
             "rolling_24h_std": rolling_24h_std,
-            "rolling_7d_same_hour_mean": rolling_7d_same_hour_mean
+            "rolling_7d_same_hour_mean": rolling_7d_same_hour_mean,
         }
 
-        # Enforce column order to match model training exactly
-        pred_features = pd.DataFrame([row_dict], columns=feature_cols)
+        # FEATURE_COLS enforces the exact column order the model was trained on.
+        # This replaces the previous build_features() call that built a full
+        # historical DataFrame on every forecast day just to extract column order.
+        pred_features = pd.DataFrame([row_dict], columns=FEATURE_COLS)
 
         # Use best_iteration so we predict with the optimal tree count found
-        # by early stopping, not all trained trees (which may include overfitted rounds)
-        pred_value = model.predict(pred_features, num_iteration=model.best_iteration)[0]
+        # by early stopping, not all trained trees (which may include overfitted rounds).
+        pred_value = float(model.predict(pred_features, num_iteration=model.best_iteration)[0])
         predictions.append(pred_value)
 
-        # Update past_prices with the prediction so that lag lookups for subsequent
-        # hours resolve correctly. This is what makes lag_1h for hour H+1 equal to
-        # the prediction for hour H rather than the last known historical price.
-        # NOTE: The dummy value inserted here is safe because all features use
-        # shifted prices ie. the current price is never used as a direct input.
-        # If any unshifted feature is added in future, this approach would need
-        # to be revisited.
+        # Write the prediction into the pre-allocated slot. Because the index key
+        # already exists (from the concat above), this is an in-place update with
+        # no Series reallocation.
         past_prices.loc[current_ts] = pred_value
 
     return pd.Series(predictions, index=target_idx)
