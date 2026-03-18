@@ -65,8 +65,11 @@ def build_features(prices: pd.Series) -> pd.DataFrame:
     # without relying on a single lag_168h point that might be an outlier.
     # We average the same hour across the previous 7 days using explicit shifts
     # to keep the feature strictly causal.
-    lags = [df["price"].shift(24 * d) for d in range(1, 8)]
-    df["rolling_7d_same_hour_mean"] = pd.concat(lags, axis=1).mean(axis=1)
+    # Accumulate with addition rather than pd.concat to avoid materialising
+    # 7 full-length Series + a wide intermediate DataFrame simultaneously.
+    # sum() then divide is equivalent and uses O(N) working memory instead of O(7N).
+    same_hour_sum = sum(df["price"].shift(24 * d) for d in range(1, 8))
+    df["rolling_7d_same_hour_mean"] = same_hour_sum / 7
 
     # Enforce FEATURE_COLS order so the returned DataFrame always matches
     # what the model expects, regardless of future column additions.
