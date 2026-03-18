@@ -144,6 +144,24 @@ def main():
         start_date_str = start_date.strftime("%Y-%m-%d")
         end_date_str = end_date.strftime("%Y-%m-%d")
 
+        # In-sample / out-of-sample warning.
+        # The model was trained on 2021–2024. Backtesting within that window
+        # produces inflated efficiency gaps because the model has seen those prices.
+        # 2025 onwards is genuinely out-of-sample and reflects real forecast quality.
+        _TRAIN_END = pd.to_datetime("2024-12-31").date()
+        if end_date <= _TRAIN_END:
+            st.warning(
+                "⚠️ Selected range falls entirely within the model's training window (2021–2024). "
+                "Results reflect **in-sample** performance and will appear stronger than "
+                "real-world deployment. Consider running 2025+ for a fair evaluation."
+            )
+        elif start_date <= _TRAIN_END:
+            st.info(
+                "ℹ️ Date range spans both the training window (pre-2025) and out-of-sample data (2025+). "
+                "For a clean comparison, run the two periods separately — "
+                "in-sample results will show a higher efficiency gap than out-of-sample."
+            )
+
         forecast_fn_map = {
             "Naive (lag-24)": (forecast_lag24, 1),
             "Naive (7-day avg)": (forecast_rolling7, 7),

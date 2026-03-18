@@ -44,7 +44,7 @@ from bess.forecast.ml import train_model, train_model_pooled, GB_MODEL_PATH, EUR
 # ============================================================
 
 TRAIN_START = "2021-01-01"
-TRAIN_END   = "2025-12-31"
+TRAIN_END   = "2024-12-31"
 
 GB_ZONES = ["GB"]  # GB-NIR shares the model but isn't worth extra API calls
 
@@ -131,7 +131,7 @@ def main():
     print(f"  Trees: {europe_model.num_trees()} (best iteration: {europe_model.best_iteration})\n")
 
     print("=" * 60)
-    print("Done. Commit models/bess_gb.lgb and models/bess_europe.lgb to your repo.")
+    print("Done.")
     print("=" * 60)
 
 

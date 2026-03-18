@@ -131,8 +131,18 @@ def main():
 
     col1, col2 = st.columns([1, 2])
     with col1:
-        target_date = st.date_input("Select Historical Date", value=pd.to_datetime("2024-06-08"))
+        target_date = st.date_input("Select Historical Date", value=pd.to_datetime("2025-03-01"))
         target_date_str = target_date.strftime("%Y-%m-%d")
+
+    # In-sample / out-of-sample warning — shown outside the columns so it
+    # spans the full width and is visible before the user clicks Run.
+    _TRAIN_END = pd.to_datetime("2024-12-31").date()
+    if target_date <= _TRAIN_END:
+        st.warning(
+            "⚠️ This date falls within the model's training window (2021–2024). "
+            "Results reflect **in-sample** performance and will appear stronger than "
+            "real-world deployment. Try a date in 2025 or later for a fair evaluation."
+        )
 
     with col2:
         model_selection = st.radio(
