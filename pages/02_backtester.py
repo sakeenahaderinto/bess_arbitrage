@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from datetime import timedelta
 
 from bess.data.cache import get_prices_cached
+from bess.data.em_client import get_zones
 from bess.forecast.naive import forecast_lag24, forecast_rolling7
 from bess.forecast.ml import train_model, forecast_ml
 from bess.backtest.engine import run_backtest
