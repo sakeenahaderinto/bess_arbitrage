@@ -2,7 +2,8 @@
 
 import math
 from typing import Sequence, Optional, Dict, Any, Tuple
-
+import io
+import contextlib
 import pyomo.environ as pyo
 from pyomo.opt import TerminationCondition
 import pandas as pd
@@ -133,7 +134,8 @@ def battery_solve_arbitrage(
         for k, v in solver_options.items():
             opt.options[k] = v
 
-    results = opt.solve(m, tee=tee)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        results = opt.solve(m, tee=tee)
     
     if results.solver.termination_condition != TerminationCondition.optimal:
         raise RuntimeError(

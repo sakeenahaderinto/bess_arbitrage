@@ -155,6 +155,9 @@ def main():
             progress_text.text(f"Running day {current} of {total}...")
             
         prices = load_historical_prices(zone, start_fetch, end_date_str)
+        nan_hours = prices[prices.isna()]
+        if not nan_hours.empty:
+            st.warning(f"Missing hours in fetched data: {nan_hours.index.to_list()}")
         
         # check zero conditions where the API key might not permit pricing
         if prices.empty or sum(prices) == 0:
@@ -186,12 +189,12 @@ def main():
         
         # Run Perfect Foresight
         progress_text.text("Running Perfect Foresight benchmark...")
-        df_pf = run_backtest(prices, None, battery_params, progress_callback=update_progress)
+        df_pf = run_backtest(prices, None, battery_params, progress_callback=update_progress, start_date=start_date_str)
         
         # Run Forecast
         progress_text.text(f"Running {model_selection} forecast...")
         progress_bar.progress(0)
-        df_fc = run_backtest(prices, engine_forecast_fn, battery_params, progress_callback=update_progress)
+        df_fc = run_backtest(prices, engine_forecast_fn, battery_params, progress_callback=update_progress, start_date=start_date_str)
         
         progress_bar.empty()
         progress_text.empty()

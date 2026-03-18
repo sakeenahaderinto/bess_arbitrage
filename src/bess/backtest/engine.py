@@ -18,7 +18,8 @@ def run_backtest(
     prices: pd.Series,
     forecast_fn: Callable | None,
     battery_params: dict,
-    progress_callback: Callable | None = None
+    progress_callback: Callable | None = None,
+    start_date: str | None = None,
 ) -> pd.DataFrame:
     """
     Runs the battery optimiser over every day in the provided price series.
@@ -54,6 +55,10 @@ def run_backtest(
     prices = prices.asfreq('h')
 
     unique_dates = sorted(list(set(prices.index.date)))
+
+    if start_date:
+        backtest_start = pd.to_datetime(start_date).date()
+        unique_dates = [d for d in unique_dates if d>= backtest_start]
 
     results = []
     total_days = len(unique_dates)
