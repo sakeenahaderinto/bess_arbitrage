@@ -24,6 +24,29 @@ def load_historical_prices(zone: str, start_date: str, end_date: str) -> pd.Seri
     return get_prices_cached(zone, start_date, end_date)
 
 
+@st.cache_data
+def run_perfect_foresight_backtest(
+    zone: str,
+    start_fetch: str,
+    end_date_str: str,
+    start_date_str: str,
+    battery_params_key: tuple,
+) -> pd.DataFrame:
+    """
+    Run and cache the perfect foresight backtest independently of the forecast model.
+
+    Keyed on primitive args so the cache hits whenever zone, dates, and battery
+    params are unchanged — even if the user switches forecast model. Without this,
+    perfect foresight re-ran as a full second backtest on every button click,
+    doubling the number of HiGHS solves unnecessarily.
+
+    battery_params_key is a sorted tuple of (key, value) pairs so it's hashable.
+    """
+    prices = load_historical_prices(zone, start_fetch, end_date_str)
+    battery_params = dict(battery_params_key)
+    return run_backtest(prices, None, battery_params, start_date=start_date_str)
+
+
 @st.cache_resource
 def load_ml_model(zone: str, start_date: str, end_date: str) -> object:
     """
@@ -196,11 +219,15 @@ def main():
         else:
             engine_forecast_fn = forecast_fn
 
-        progress_text.text("Running Perfect Foresight benchmark...")
-        df_pf = run_backtest(
-            prices, None, battery_params,
-            progress_callback=update_progress,
-            start_date=start_date_str,
+        # Battery params as a sorted tuple so it is hashable for @st.cache_data.
+        battery_params_key = tuple(sorted(battery_params.items()))
+
+        # Perfect foresight is cached by zone + dates + battery params independently
+        # of the forecast model -- switching Naive / ML no longer triggers a second
+        # full 365-day HiGHS backtest on every button click.
+        progress_text.text("Running Perfect Foresight benchmark (cached after first run)...")
+        df_pf = run_perfect_foresight_backtest(
+            zone, start_fetch, end_date_str, start_date_str, battery_params_key
         )
 
         progress_text.text(f"Running {model_selection} forecast...")

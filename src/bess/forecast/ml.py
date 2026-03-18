@@ -250,14 +250,20 @@ def forecast_ml(model: lgb.Booster, historical_prices: pd.Series, forecast_date:
             "rolling_7d_same_hour_mean": rolling_7d_same_hour_mean,
         }
 
-        # FEATURE_COLS enforces the exact column order the model was trained on.
-        # This replaces the previous build_features() call that built a full
-        # historical DataFrame on every forecast day just to extract column order.
-        pred_features = pd.DataFrame([row_dict], columns=FEATURE_COLS)
+        # Build a (1, n_features) numpy array in FEATURE_COLS order rather than
+        # constructing a pd.DataFrame for each of the 24 × 365 = 8,760 predictions.
+        # DataFrame construction has significant Python-level overhead at that scale;
+        # LightGBM's predict() accepts numpy arrays directly with no accuracy change.
+        pred_array = [[
+            row_dict["hour"], row_dict["dayofweek"], row_dict["month"],
+            row_dict["lag_1h"], row_dict["lag_24h"], row_dict["lag_48h"], row_dict["lag_168h"],
+            row_dict["rolling_24h_mean"], row_dict["rolling_24h_std"],
+            row_dict["rolling_7d_same_hour_mean"],
+        ]]
 
         # Use best_iteration so we predict with the optimal tree count found
         # by early stopping, not all trained trees (which may include overfitted rounds).
-        pred_value = float(model.predict(pred_features, num_iteration=model.best_iteration)[0])
+        pred_value = float(model.predict(pred_array, num_iteration=model.best_iteration)[0])
         predictions.append(pred_value)
 
         # Write the prediction into the pre-allocated slot. Because the index key
