@@ -6,7 +6,7 @@ from datetime import timedelta
 from bess.data.cache import get_prices_cached
 from bess.data.em_client import get_zones
 from bess.forecast.naive import forecast_lag24, forecast_rolling7
-from bess.forecast.ml import train_model, forecast_ml
+from bess.forecast.ml import load_pretrained_model, forecast_ml
 from bess.backtest.engine import run_backtest
 from bess.metrics import efficiency_gap, daily_summary, payback_period
 
@@ -34,31 +34,12 @@ def run_perfect_foresight_backtest(
 ) -> pd.DataFrame:
     """
     Run and cache the perfect foresight backtest independently of the forecast model.
-
     Keyed on primitive args so the cache hits whenever zone, dates, and battery
-    params are unchanged — even if the user switches forecast model. Without this,
-    perfect foresight re-ran as a full second backtest on every button click,
-    doubling the number of HiGHS solves unnecessarily.
-
-    battery_params_key is a sorted tuple of (key, value) pairs so it's hashable.
+    params are unchanged — even if the user switches forecast model.
     """
     prices = load_historical_prices(zone, start_fetch, end_date_str)
     battery_params = dict(battery_params_key)
     return run_backtest(prices, None, battery_params, start_date=start_date_str)
-
-
-@st.cache_resource
-def load_ml_model(zone: str, start_date: str, end_date: str) -> object:
-    """
-    Train and cache the LightGBM model keyed on primitive string args.
-
-    The previous version passed a pd.Series as the cache key. Streamlit cannot
-    hash a pd.Series for @st.cache_resource, so the cache never hit — the model
-    was retrained from scratch on every widget interaction, which is what was
-    causing the OOM crash on Streamlit Cloud before the backtest even started.
-    """
-    prices = load_historical_prices(zone, start_date, end_date)
-    return train_model(prices)
 
 
 def render_sidebar():
@@ -212,9 +193,7 @@ def main():
 
         engine_forecast_fn = None
         if forecast_fn == forecast_ml:
-            # Cache key uses primitive strings — no retraining on re-runs with same params.
-            with st.spinner("Training LightGBM model..."):
-                ml_model = load_ml_model(zone, start_fetch, end_date_str)
+            ml_model = load_pretrained_model(zone)
             engine_forecast_fn = lambda p, d: forecast_ml(ml_model, p, d)
         else:
             engine_forecast_fn = forecast_fn

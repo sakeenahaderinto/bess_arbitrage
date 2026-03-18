@@ -272,3 +272,127 @@ def forecast_ml(model: lgb.Booster, historical_prices: pd.Series, forecast_date:
         past_prices.loc[current_ts] = pred_value
 
     return pd.Series(predictions, index=target_idx)
+
+
+# ============================================================
+# Pre-trained model loading (deployed app)
+# ============================================================
+
+# Zones supported by the GB-specific model.
+# GB-NIR trades separately from Great Britain but is grouped here because it
+# shares enough structural similarity (island grid, sterling pricing) to be
+# better served by the GB model than the continental European one.
+_GB_ZONES = {"GB", "GB-NIR"}
+
+# Zones supported by the continental European pooled model.
+EUROPEAN_ZONES_SUPPORTED = [
+    "DE", "FR", "NL", "ES", "IT-NO", "SE-SE3", "PL", "BE",
+]
+
+GB_MODEL_PATH = "models/bess_gb.lgb"
+EUROPE_MODEL_PATH = "models/bess_europe.lgb"
+
+
+def train_model_pooled(zone_series: list[pd.Series]) -> lgb.Booster:
+    """
+    Train a LightGBM model on price data pooled across multiple zones.
+
+    Each zone's Series is processed through build_features() independently
+    before concatenation. This avoids the duplicate DatetimeIndex problem
+    that occurs when naively concatenating raw price Series from multiple
+    zones — all zones share the same timestamps, so pd.concat produces
+    duplicate index labels that asfreq('h') cannot reindex over.
+
+    Args:
+        zone_series: List of pd.Series, one per zone, each with a UTC
+                     DatetimeIndex. At least one must produce non-empty
+                     features after NaN dropping.
+
+    Returns:
+        Trained lgb.Booster with best_iteration set by early stopping.
+
+    Raises:
+        ValueError: If no valid feature rows are produced across all zones.
+    """
+    feature_frames = []
+    for s in zone_series:
+        df = build_features(s).dropna()
+        if not df.empty:
+            feature_frames.append(df)
+
+    if not feature_frames:
+        raise ValueError(
+            "No valid feature rows produced across any zone. "
+            "Check that each Series has at least 30 days of data."
+        )
+
+    # Reset index so the pooled DataFrame has no duplicate timestamp labels.
+    # The DatetimeIndex is not used downstream — only the feature columns matter.
+    pooled_df = pd.concat(feature_frames, ignore_index=True)
+
+    split_idx = int(len(pooled_df) * 0.75)
+    train = pooled_df.iloc[:split_idx]
+    val = pooled_df.iloc[split_idx:]
+
+    target = "price"
+    train_data = lgb.Dataset(train[FEATURE_COLS], label=train[target])
+    val_data = lgb.Dataset(val[FEATURE_COLS], label=val[target], reference=train_data)
+
+    params = {
+        "objective": "regression",
+        "metric": "rmse",
+        "learning_rate": 0.05,
+        "num_leaves": 31,
+        "verbose": -1,
+        "seed": 42,
+    }
+
+    booster = lgb.train(
+        params,
+        train_data,
+        num_boost_round=500,
+        valid_sets=[val_data],
+        callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False)],
+    )
+
+    del train_data, val_data, train, val, pooled_df, feature_frames
+    gc.collect()
+
+    return booster
+
+
+def load_pretrained_model(zone: str) -> lgb.Booster:
+    """
+    Load the appropriate pre-trained LightGBM booster for the given zone.
+
+    Two models are maintained:
+      - bess_gb.lgb     : Trained on GB data only. GB is an island grid with
+                          no synchronous AC interconnection to continental Europe,
+                          prices in £, and a more pronounced evening ramp due to
+                          the absence of cross-border smoothing via interconnectors.
+                          A model trained on continental patterns would systematically
+                          underestimate peak amplitudes for GB.
+      - bess_europe.lgb : Trained on pooled DE/FR/NL/ES/IT-NO/SE-SE3/PL/BE data.
+                          Pooling across zones gives the model a richer distribution
+                          of price regimes (hydro-dominated Nordics, solar-heavy
+                          Southern Europe, gas-indexed Central Europe) without
+                          requiring a separate model per zone.
+
+    Args:
+        zone: Zone code from EUROPEAN_ZONES_SUPPORTED or _GB_ZONES.
+
+    Returns:
+        lgb.Booster ready for inference.
+
+    Raises:
+        FileNotFoundError: If the model file is missing — run train_models.py locally
+                           and commit the .lgb files before deploying.
+    """
+    model_path = GB_MODEL_PATH if zone in _GB_ZONES else EUROPE_MODEL_PATH
+    try:
+        return lgb.Booster(model_file=model_path)
+    except Exception:
+        raise FileNotFoundError(
+            f"Pre-trained model not found at '{model_path}'. "
+            "Run train_models.py locally and commit the .lgb files to the repo."
+        )
