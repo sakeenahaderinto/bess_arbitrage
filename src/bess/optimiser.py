@@ -2,8 +2,6 @@
 
 import math
 from typing import Sequence, Optional, Dict, Any, Tuple
-import io
-import contextlib
 import pyomo.environ as pyo
 from pyomo.opt import TerminationCondition
 import pandas as pd
@@ -85,6 +83,14 @@ def _build_model(
         raise RuntimeError(
             "HiGHS solver not found. Install it with: pip install highspy"
         )
+
+    # Suppress HiGHS console output via solver option rather than redirecting
+    # stdout/stderr. The redirect approach causes a TeeStream deadlock in Pyomo
+    # when the persistent solver is reused across hundreds of solves in a backtest
+    # loop — Pyomo's internal reader threads accumulate and eventually deadlock.
+    # Setting output_flag=False tells HiGHS directly not to produce output,
+    # which is cleaner and avoids the threading conflict entirely.
+    opt.options["output_flag"] = False
 
     return m, opt
 
@@ -204,8 +210,7 @@ def battery_solve_arbitrage(
         for k, v in solver_options.items():
             opt.options[k] = v
 
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        results = opt.solve(m, tee=tee)
+    results = opt.solve(m, tee=tee)
 
     if results.solver.termination_condition != TerminationCondition.optimal:
         raise RuntimeError(
@@ -274,8 +279,7 @@ def backtest_solve(
     """
     _update_prices(m, prices)
 
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        results = opt.solve(m, tee=tee)
+    results = opt.solve(m, tee=tee)
 
     if results.solver.termination_condition != TerminationCondition.optimal:
         raise RuntimeError(
