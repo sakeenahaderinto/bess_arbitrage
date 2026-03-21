@@ -14,7 +14,7 @@ st.set_page_config(page_title="Region Comparison", page_icon="🌍", layout="wid
 
 @st.cache_data
 def load_zones():
-    # If the API blocks, just provide a fallback list
+    # Provide a static fallback list in the event of API connectivity issues or rate limits.
     try:
         return get_zones()
     except Exception:
@@ -27,14 +27,14 @@ def main():
     st.title("🌍 Region Comparison")
     st.markdown("Compare arbitrage potential across multiple electricity markets.")
 
-    # 1. Check dependencies
+    # Step 1: Validate session state dependencies.
     required_keys = ["e_max_mwh", "p_max_mw", "roundtrip_eff", "deg_cost_per_mwh"]
     for key in required_keys:
         if key not in st.session_state:
             st.warning("Sidebar parameters missing. Please visit the main page first.")
             return
 
-    # 2. UI Setup
+    # Step 2: Initialize user interface and retrieve geographic zones.
     all_zones = load_zones()
     
     with st.form("region_form"):
@@ -74,14 +74,14 @@ def main():
             "deg_cost_per_mwh": st.session_state["deg_cost_per_mwh"]
         }
 
-        # Progress elements
+        # Initialize UI progress indicators.
         st.markdown("---")
         progress_text = st.empty()
         progress_bar = st.progress(0)
 
         results_data = []
 
-        # Iterate over zones and run backtests in Perfect Foresight
+        # Sequentially iterate over selected geographic zones and execute perfect foresight backtests.
         for idx, z in enumerate(selected_zones):
             progress_text.text(f"Fetching data and running optimiser for {z} ({idx+1}/{len(selected_zones)})...")
             progress_bar.progress((idx) / len(selected_zones))
@@ -92,13 +92,12 @@ def main():
                 st.error(f"Could not fetch prices for zone {z} — skipping.")
                 continue
                 
-            # Run the engine
+            # Execute the core optimization engine.
             df_bt = run_backtest(prices, None, battery_params)
             
             if not df_bt.empty:
-                # calculate std dev of daily price spread
-                # standard daily spread: max(price) - min(price) on each day
-                # Group by date strings to get daily spread
+                # Calculate the standard deviation of intra-day price volatility.
+                # Daily spread computation: the differential between maximum and minimum prices.
                 daily_max = prices.groupby(prices.index.date).max()
                 daily_min = prices.groupby(prices.index.date).min()
                 daily_spreads = daily_max - daily_min
@@ -115,7 +114,7 @@ def main():
                     "Profitable Days (%)": summary.get("pct_profitable", 0)
                 })
 
-        # Clear progress elements completely
+        # Erase progress indicators upon successful completion.
         progress_bar.empty()
         progress_text.empty()
 

@@ -20,7 +20,7 @@ def load_zones():
 
 @st.cache_data
 def load_historical_prices(zone: str, start_date: str, end_date: str) -> pd.Series:
-    """Fetch and cache prices by primitive string args so Streamlit can hash them."""
+    """Retrieves and caches historical prices based on primitive string arguments for Streamlit hashing."""
     return get_prices_cached(zone, start_date, end_date)
 
 
@@ -32,10 +32,11 @@ def run_perfect_foresight_backtest(
     start_date_str: str,
     battery_params_key: tuple,
 ) -> pd.DataFrame:
-    """
-    Run and cache the perfect foresight backtest independently of the forecast model.
-    Keyed on primitive args so the cache hits whenever zone, dates, and battery
-    params are unchanged — even if the user switches forecast model.
+    """Executes and caches the perfect foresight backtest independently of any forecast model.
+
+    The function is keyed on primitive arguments to ensure cache hits remain valid
+    when the zone, date range, and battery parameters are unchanged, regardless of
+    whether the user switches the active forecast model.
     """
     prices = load_historical_prices(zone, start_fetch, end_date_str)
     battery_params = dict(battery_params_key)
@@ -144,10 +145,10 @@ def main():
         start_date_str = start_date.strftime("%Y-%m-%d")
         end_date_str = end_date.strftime("%Y-%m-%d")
 
-        # In-sample / out-of-sample warning.
-        # The model was trained on 2021–2024. Backtesting within that window
-        # produces inflated efficiency gaps because the model has seen those prices.
-        # 2025 onwards is genuinely out-of-sample and reflects real forecast quality.
+        # Evaluate in-sample vs out-of-sample boundaries to warn the user.
+        # The model training horizon is 2021-2024. Evaluating within this window yields
+        # inflated efficiency metrics due to data leakage.
+        # Data from 2025 onwards is strictly out-of-sample and reflects genuine performance.
         _TRAIN_END = pd.to_datetime("2024-12-31").date()
         if end_date <= _TRAIN_END:
             st.warning(
@@ -169,7 +170,7 @@ def main():
         }
         forecast_fn, lookback_days = forecast_fn_map[model_selection]
 
-        # Fetch enough history for the forecast model's lag features.
+        # Retrieve sufficient historical data to populate the predictive model's lag features.
         start_fetch = (start_date - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
         st.markdown("---")
@@ -216,12 +217,12 @@ def main():
         else:
             engine_forecast_fn = forecast_fn
 
-        # Battery params as a sorted tuple so it is hashable for @st.cache_data.
+        # Convert battery parameters to a sorted tuple to ensure a consistent hash for caching.
         battery_params_key = tuple(sorted(battery_params.items()))
 
-        # Perfect foresight is cached by zone + dates + battery params independently
-        # of the forecast model -- switching Naive / ML no longer triggers a second
-        # full 365-day HiGHS backtest on every button click.
+        # The perfect foresight benchmark is cached independently of the forecast model.
+        # Consequently, switching between Naive and ML models does not trigger a redundant
+        # computationally expensive HiGHS optimization pass.
         progress_text.text("Running Perfect Foresight benchmark (cached after first run)...")
         df_pf = run_perfect_foresight_backtest(
             zone, start_fetch, end_date_str, start_date_str, battery_params_key

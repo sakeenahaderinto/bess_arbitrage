@@ -5,15 +5,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Zones supported by the deployed app.
+# Regional zones supported by the deployed application.
 #
-# Trimmed from the full Electricitymaps European list to the zones covered by
-# one of the two pre-trained models (bess_gb.lgb and bess_europe.lgb).
-# Exposing unsupported zones in the dropdown would let users select a market
-# the model has never seen, silently producing misleading predictions.
+# Restricted to zones covered by the pre-trained models (bess_gb.lgb and bess_europe.lgb).
+# Exposing unsupported zones would permit the selection of unseen markets,
+# potentially resulting in invalid or misleading predictive performance.
 #
-# GB model  : GB, GB-NIR
-# Europe model: DE, FR, NL, ES, IT-NO, SE-SE3, PL, BE
+# GB model targets: GB, GB-NIR
+# Europe model targets: DE, FR, NL, ES, IT-NO, SE-SE3, PL, BE
 SUPPORTED_ZONES = [
     "BE",
     "DE",
@@ -49,31 +48,30 @@ def _validate_zone(zone: str) -> None:
 
 
 def get_zones() -> list[str]:
-    """Returns the list of zones supported by the deployed models."""
+    """Retrieves the list of regional zones supported by the deployed predictive models."""
     return SUPPORTED_ZONES
 
 
 def get_historical_prices(zone: str, start_date: str, end_date: str, timeout: int = 10) -> pd.Series:
-    """
-    Fetches hourly day-ahead prices for a zone over a date range.
+    """Fetches hourly day-ahead prices for a specified zone over a date range.
 
-    The Electricitymaps API limits requests to 10 days at a time, so this
-    function loops in 10-day chunks and stitches the results together.
+    Due to API request limits (maximum 10 days per call), this function automatically
+    paginates requests in 10-day increments and concatenates the resulting data.
 
     Args:
-        zone:       Zone code, must be in SUPPORTED_ZONES (e.g. "DE", "GB").
-        start_date: Start date in "YYYY-MM-DD" format (inclusive).
-        end_date:   End date in "YYYY-MM-DD" format. One day is added internally
-                    so that all 24 hours of the end_date are captured.
-        timeout:    Timeout in seconds for API requests.
+        zone: The target zone identifier (must be present in `SUPPORTED_ZONES`).
+        start_date: The inclusive start date in 'YYYY-MM-DD' format.
+        end_date: The end date in 'YYYY-MM-DD' format. An additional day is appended
+                  internally to ensure capturing all 24 hours of the specified end date.
+        timeout: The request timeout duration in seconds.
 
     Returns:
-        pd.Series with a UTC DatetimeIndex and float price values.
+        pd.Series: A sequence of hourly prices with a UTC DatetimeIndex.
 
     Raises:
-        ValueError:     If the zone is unsupported or API key is missing.
-        PermissionError: If the API returns 401.
-        RuntimeError:   If the API returns any other non-200 status.
+        ValueError: If the zone is unsupported or the API key is missing/invalid.
+        PermissionError: If the remote API returns an HTTP 401 Unauthorized status.
+        RuntimeError: If the remote API returns any other non-200 HTTP status.
     """
     api_key = _get_api_key()
     _validate_zone(zone)
@@ -136,19 +134,19 @@ def get_historical_prices(zone: str, start_date: str, end_date: str, timeout: in
 
 
 def get_day_ahead_forecast(zone: str, timeout: int = 10) -> pd.Series:
-    """
-    Fetches the 72-hour day-ahead price forecast for a zone.
+    """Fetches the 72-hour day-ahead price forecast from the external API.
 
     Args:
-        zone: Zone code, must be in SUPPORTED_ZONES.
+        zone: The target zone identifier (must be present in `SUPPORTED_ZONES`).
+        timeout: The request timeout duration in seconds.
 
     Returns:
-        pd.Series with a UTC DatetimeIndex and float price values (up to 72 hours).
+        pd.Series: A sequence of up to 72 sequential hourly price forecasts with a UTC DatetimeIndex.
 
     Raises:
-        ValueError:     If the zone is unsupported or API key is missing.
-        PermissionError: If the API returns 401.
-        RuntimeError:   If the API returns any other non-200 status.
+        ValueError: If the zone is unsupported or the API key is missing/invalid.
+        PermissionError: If the remote API returns an HTTP 401 Unauthorized status.
+        RuntimeError: If the remote API returns any other non-200 HTTP status.
     """
     api_key = _get_api_key()
     _validate_zone(zone)

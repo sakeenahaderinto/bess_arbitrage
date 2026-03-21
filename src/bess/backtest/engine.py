@@ -15,8 +15,8 @@ FAILED_DAY = {
     "solve_failed": True,
 }
 
-# Collect garbage every N days rather than every day.
-# gc.collect() on each of 365 days adds meaningful overhead on a slow shared CPU.
+# Throttle garbage collection interval.
+# Running `gc.collect()` daily introduces noticeable overhead on shared CPU resources.
 _GC_INTERVAL = 20
 
 
@@ -27,30 +27,31 @@ def run_backtest(
     progress_callback: Callable | None = None,
     start_date: str | None = None,
 ) -> pd.DataFrame:
-    """
-    Runs the battery optimiser over every day in the provided price series.
+    """Executes the battery optimizer over each day in the provided price series.
 
-    The Pyomo ConcreteModel and HiGHS solver are built once before the loop and
-    reused on every day via mutable price Params. This eliminates per-day model
-    construction (RangeSet, Var, Constraint objects) which was the dominant
-    source of slowness on constrained CPUs like Streamlit Cloud.
+    The Pyomo ConcreteModel and HiGHS solver are initialized once prior to the loop
+    and reused for each day via mutable price parameters. This approach avoids the
+    overhead of daily model reconstruction, which significantly improves performance
+    on resource-constrained environments.
 
     Note: Days containing fewer or more than exactly 24 hours are skipped. This
-    natively drops dates where Daylight Saving Time (DST) transitions produce
-    23- or 25-hour days. Days with NaN prices are also skipped.
+    natively handles Daylight Saving Time (DST) transitions that produce 23-hour
+    or 25-hour days. Days containing NaN prices are also skipped.
 
     Args:
-        prices: Historical price Series with a UTC DatetimeIndex.
-        forecast_fn: A function `(prices, date_str) -> pd.Series` that provides
-                     a 24-hour forecast. If None, uses actual prices (perfect foresight).
-        battery_params: Dict of parameters for build_backtest_solver / backtest_solve.
-        progress_callback: Optional function `(current_day_int, total_days_int)`
-                           to report progress back to the caller/UI.
-        start_date: Optional date string 'YYYY-MM-DD'. If provided, only dates
-                    on or after this date are included in the backtest.
+        prices: A historical price Series with a UTC DatetimeIndex.
+        forecast_fn: An optional callable `(prices, date_str) -> pd.Series` that
+                     provides a 24-hour forecast. If None, uses actual prices
+                     (perfect foresight).
+        battery_params: A dictionary of parameters required by the solver.
+        progress_callback: An optional callable `(current_day_int, total_days_int)`
+                           to report backtest progress.
+        start_date: An optional date string in 'YYYY-MM-DD' format. If provided,
+                    only dates on or after this date are evaluated.
 
     Returns:
-        pd.DataFrame: A row per day with performance metrics.
+        pd.DataFrame: A DataFrame containing daily performance metrics, with one row
+        per evaluated day.
     """
     if prices.empty:
         return pd.DataFrame()
@@ -75,9 +76,8 @@ def run_backtest(
     total_days = len(unique_dates)
     dt_hours = battery_params.get("dt_hours", 1.0)
 
-    # Build the Pyomo model and solver once — reused for every day in the loop.
-    # On a 365-day backtest this avoids 364 redundant ConcreteModel constructions,
-    # which is the dominant cost on a slow shared CPU (Streamlit Cloud free tier).
+    # Initialize the Pyomo model and solver once to be reused across all days,
+    # optimizing execution time by avoiding redundant daily model constructions.
     m, opt = build_backtest_solver(battery_params)
 
     for i, current_date in enumerate(unique_dates):
@@ -168,7 +168,7 @@ def run_backtest(
             logger.error(f"Solve failed for {date_str}: {e}")
             results.append({"date": current_date, **FAILED_DAY})
 
-        # Throttle GC — collecting every day adds overhead on slow CPUs.
+        # Throttle garbage collection to minimize overhead during the backtest loop.
         if i % _GC_INTERVAL == 0:
             gc.collect()
 

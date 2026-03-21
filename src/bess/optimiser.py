@@ -1,4 +1,8 @@
-# Energy Storage Arbitrage --> Where an energy storage operator captures economic value from price volatility
+"""Energy Storage Arbitrage Optimization Module.
+
+This module provides the core optimization logic for battery energy storage.
+It allows an energy storage operator to capture economic value from price volatility.
+"""
 
 import math
 from typing import Sequence, Optional, Dict, Any, Tuple
@@ -25,13 +29,27 @@ def _build_model(
     no_simultaneous: bool,
     return_duals: bool,
 ) -> Tuple[pyo.ConcreteModel, Any]:
-    """
-    Constructs the Pyomo ConcreteModel and persistent HiGHS solver instance
-    with dummy zero prices. Called once per backtest run; prices are updated
-    cheaply via mutable Params on each subsequent day using _update_prices().
+    """Constructs the Pyomo ConcreteModel and persistent HiGHS solver instance.
+
+    Initialises the model with dummy zero prices. Called once per backtest run;
+    prices are updated efficiently via mutable Pyomo constraints (Params) on each
+    subsequent day using `_update_prices()`.
+
+    Args:
+        n: The number of time steps.
+        e_max_mwh: Maximum energy capacity in MWh.
+        p_max_mw: Maximum power capacity in MW.
+        roundtrip_eff: Roundtrip efficiency (fraction).
+        soc0_mwh: Initial state of charge in MWh.
+        dt_hours: Time step duration in hours.
+        deg_cost_per_mwh: Degradation cost per MWh of throughput.
+        enforce_terminal_soc: Whether to enforce the terminal SOC to equal the initial SOC.
+        no_simultaneous: Whether to prevent simultaneous charging and discharging.
+        return_duals: Whether to compute and return shadow prices (duals).
 
     Returns:
-        (model, solver) — both are reused across the entire backtest loop.
+        Tuple[pyo.ConcreteModel, Any]: The initialized model and solver pair,
+        which are reused across the entire backtest loop.
     """
     eta_c = math.sqrt(roundtrip_eff)
     eta_d = math.sqrt(roundtrip_eff)
@@ -96,7 +114,12 @@ def _build_model(
 
 
 def _update_prices(m: pyo.ConcreteModel, prices: Sequence[float]) -> None:
-    """Update mutable price params in-place. O(n) with no model reconstruction."""
+    """Updates mutable price parameters in-place without model reconstruction.
+
+    Args:
+        m: The Pyomo ConcreteModel instance.
+        prices: A sequence of prices for the target evaluation period.
+    """
     for t, p in enumerate(prices):
         m.price[t].set_value(p)
 
@@ -107,7 +130,18 @@ def _extract_solution(
     dt_hours: float,
     return_duals: bool,
 ) -> Tuple[pd.DataFrame, float]:
-    """Extract dispatch DataFrame and total profit from a solved model."""
+    """Extracts the dispatch DataFrame and total profit from a solved model.
+
+    Args:
+        m: The solved Pyomo ConcreteModel instance.
+        prices: The sequence of prices used for the optimization.
+        dt_hours: The duration of each time step in hours.
+        return_duals: Whether shadow prices (duals) were computed and should be returned.
+
+    Returns:
+        Tuple[pd.DataFrame, float]: A tuple containing the extracted dispatch schedule
+        DataFrame and the total profit as a float.
+    """
     n = len(prices)
     rows = []
     for t in range(n):
@@ -160,15 +194,29 @@ def battery_solve_arbitrage(
         tee: bool = False,
         solver_options: Optional[Dict[str, Any]] = None,
 ) -> Tuple[pyo.ConcreteModel, Any, pd.DataFrame, float]:
-    """
-    Solve the battery arbitrage problem for a single price sequence.
+    """Solves the battery arbitrage problem for a single price sequence.
 
-    Builds and solves a fresh model each call. For repeated solves over many
-    days (e.g. backtesting), prefer build_backtest_solver() + backtest_solve()
+    Builds and solves a fresh model for each call. For repeated evaluates over many
+    days (e.g. backtesting), prefer `build_backtest_solver()` and `backtest_solve()`
     which reuse the model structure and avoid per-day reconstruction overhead.
 
-    Return:
-        model, results, dataframe, total_profit
+    Args:
+        prices: A sequence of price data for the optimization horizon.
+        e_max_mwh: Maximum energy capacity in MWh.
+        p_max_mw: Maximum power capacity in MW.
+        roundtrip_eff: Roundtrip efficiency (fraction).
+        soc0_mwh: Initial state of charge in MWh.
+        dt_hours: Time step duration in hours.
+        deg_cost_per_mwh: Degradation cost per MWh of throughput.
+        enforce_terminal_soc: Whether to enforce the terminal SOC to equal the initial SOC.
+        no_simultaneous: Whether to prevent simultaneous charging and discharging.
+        return_duals: Whether to compute and return shadow prices (duals).
+        tee: Whether to print solver output.
+        solver_options: Optional dictionary of solver configuration overrides.
+
+    Returns:
+        Tuple[pyo.ConcreteModel, Any, pd.DataFrame, float]: A tuple containing the
+        solved model, solver results object, dispatch DataFrame, and total profit.
     """
     prices = [float(p) for p in prices]
     if len(prices) == 0:
@@ -226,19 +274,20 @@ def build_backtest_solver(
     battery_params: dict,
     n: int = 24,
 ) -> Tuple[pyo.ConcreteModel, Any]:
-    """
-    Build a reusable Pyomo model + HiGHS solver pair for backtest loops.
+    """Builds a reusable Pyomo model and HiGHS solver pair for backtest loops.
 
     The model structure (variables, constraints, objective) is constructed once.
-    On each day, call backtest_solve(m, opt, prices, battery_params) to update
-    the price params and re-solve without any model reconstruction overhead.
+    For each subsequent day, `backtest_solve(m, opt, prices, battery_params)`
+    is called to update the price parameters and re-solve, avoiding model
+    reconstruction overhead.
 
     Args:
-        battery_params: Same dict passed to battery_solve_arbitrage.
-        n: Number of timesteps per day (default 24 for hourly).
+        battery_params: Battery specifications, same dictionary as passed to `battery_solve_arbitrage`.
+        n: Number of time steps per day (default 24 for hourly resolution).
 
     Returns:
-        (model, solver) — pass both to backtest_solve() on each iteration.
+        Tuple[pyo.ConcreteModel, Any]: The initialized Pyomo model and solver instance to pass
+        to `backtest_solve()` on each iteration.
     """
     return _build_model(
         n,
@@ -261,21 +310,21 @@ def backtest_solve(
     battery_params: dict,
     tee: bool = False,
 ) -> Tuple[pd.DataFrame, float]:
-    """
-    Update prices on a pre-built model and re-solve. No model reconstruction.
+    """Updates prices on a pre-built model and re-solves without model reconstruction.
 
     Args:
-        m: ConcreteModel from build_backtest_solver().
-        opt: Solver from build_backtest_solver().
-        prices: 24-element price list for this day.
-        battery_params: Same dict passed to build_backtest_solver().
+        m: The pre-built Pyomo ConcreteModel from `build_backtest_solver()`.
+        opt: The pre-built solver from `build_backtest_solver()`.
+        prices: A sequence of prices (typically a 24-element list) for the given day.
+        battery_params: Battery specifications, same dictionary as passed to `build_backtest_solver()`.
         tee: Whether to print solver output.
 
     Returns:
-        (df_dispatch, profit)
+        Tuple[pd.DataFrame, float]: A tuple containing the dispatch schedule DataFrame
+        and the corresponding total daily profit.
 
     Raises:
-        RuntimeError: If the solver does not return an optimal solution.
+        RuntimeError: If the solver termination condition is not optimal.
     """
     _update_prices(m, prices)
 
@@ -293,6 +342,15 @@ def backtest_solve(
 
 
 def plot_solution(df: pd.DataFrame, title: str = "Battery arbitrage (perfect foresight)") -> plt.Figure:
+    """Generates a multi-panel plot visualizing the battery dispatch schedule.
+
+    Args:
+        df: The DataFrame containing the optimization results.
+        title: The title for the generated plot.
+
+    Returns:
+        plt.Figure: The generated matplotlib figure object.
+    """
     fig, ax = plt.subplots(3, 1, sharex=True, figsize=(10, 7))
 
     ax[0].plot(df.index, df["price_per_mwh"], marker="o")

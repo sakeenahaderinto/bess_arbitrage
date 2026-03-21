@@ -2,14 +2,14 @@
 import streamlit as st
 from bess.data.em_client import get_zones
 
-# Page config must be the first Streamlit command
+# Initialize Streamlit page configuration as the required first command.
 st.set_page_config(
     page_title="BESS Arbitrage Optimiser",
     page_icon="⚡",
     layout="wide"
 )
 
-# Cache the zone list so we don't fetch it repeatedly
+# Prevent redundant API calls by caching the geographic zone list.
 @st.cache_data
 def load_zones():
     return get_zones()
@@ -17,15 +17,15 @@ def load_zones():
 def render_sidebar():
     st.sidebar.header("Battery Parameters")
     
-    # API Status Indicator
+    # Verify API connectivity and initialize the status indicator.
     try:
         zones = load_zones()
         st.sidebar.success("✓ API connected")
     except Exception as e:
         st.sidebar.error(f"✗ API error: {e}")
-        zones = ["DE"] # Fallback just so the UI doesn't completely crash
+        zones = ["DE"]  # Fallback target to prevent catastrophic UI failure.
 
-    # Zone Selector
+    # Market zone selection interface.
     zone = st.sidebar.selectbox(
         "Market Zone", 
         options=zones, 
@@ -33,7 +33,7 @@ def render_sidebar():
     )
     st.session_state["zone"] = zone
     
-    # Battery capacity
+    # Battery maximum energy capacity parameter.
     e_max_mwh = st.sidebar.number_input(
         "Battery capacity (MWh)", 
         min_value=0.1, max_value=1000.0, value=st.session_state.get("e_max_mwh", 1.0), step=0.1,
@@ -41,7 +41,7 @@ def render_sidebar():
     )
     st.session_state["e_max_mwh"] = e_max_mwh
     
-    # Power rating
+    # Battery maximum power rating parameter.
     p_max_mw = st.sidebar.number_input(
         "Power rating (MW)", 
         min_value=0.1, max_value=1000.0, value=st.session_state.get("p_max_mw", 0.5), step=0.1,
@@ -49,7 +49,7 @@ def render_sidebar():
     )
     st.session_state["p_max_mw"] = p_max_mw
     
-    # Efficiency
+    # Round-trip operational efficiency parameter.
     eff_pct = st.sidebar.slider(
         "Round-trip efficiency (%)", 
         min_value=50, max_value=100, value=int(st.session_state.get("roundtrip_eff", 0.9) * 100), step=1,
@@ -57,7 +57,7 @@ def render_sidebar():
     )
     st.session_state["roundtrip_eff"] = eff_pct / 100.0
     
-    # Degradation Cost
+    # Marginal throughput degradation cost parameter.
     deg_cost = st.sidebar.number_input(
         "Degradation cost (£/MWh)", 
         min_value=0.0, value=st.session_state.get("deg_cost_per_mwh", 5.0), step=0.5,
@@ -65,12 +65,12 @@ def render_sidebar():
     )
     st.session_state["deg_cost_per_mwh"] = deg_cost
     
-    # MILP Toggle
+    # Mixed-Integer Linear Programming (MILP) strict operational constraints toggle.
     enforce_milp = st.sidebar.checkbox(
         "Enforce no simultaneous charge/discharge",
         value=st.session_state.get("enforce_new_milp", False)
     )
-    st.session_state["enforce_new_milp"] = enforce_milp  # Or standard simple modeling
+    st.session_state["enforce_new_milp"] = enforce_milp  # Defaults to standard linear modeling.
     
     st.sidebar.markdown("---")
     if st.sidebar.button("Reset to defaults"):

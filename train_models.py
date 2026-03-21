@@ -1,34 +1,18 @@
-"""
-train_models.py — run locally, never deployed.
+"""Script for local model training (not intended for production deployment).
 
-Pulls historical prices for the selected zones, trains two LightGBM models
-(GB-specific and continental European pooled), and saves them to models/.
-Commit both .lgb files to the repo so the deployed app can load them without
-any training at runtime.
+Retrieves historical price data for predefined geographic zones, trains two distinct
+LightGBM predictive models (a GB-specific model and a pooled continental European model),
+and serializes the artifacts to the `models/` directory.
+
+The generated `.lgb` artifacts should be committed to version control, enabling the
+deployed application to load them instantaneously without incurring runtime training costs.
 
 Usage:
     python train_models.py
 
 Requirements:
-    - EM_API_KEY set in your .env file
-    - pip install lightgbm pandas pyarrow python-dotenv
-
-Two models are trained:
-    models/bess_gb.lgb      — GB and GB-NIR only
-    models/bess_europe.lgb  — DE, FR, NL, ES, IT-NO, SE-SE3, PL, BE pooled
-
-Why two models?
-    GB is an island grid with no synchronous AC interconnection to continental
-    Europe. Prices clear in £ on EPEX/N2EX, and the evening ramp is more
-    pronounced because there's no cross-border smoothing via interconnectors.
-    Training a single model on continental patterns and applying it to GB would
-    systematically underestimate peak amplitudes.
-
-    The continental model pools 8 zones to give the model a richer distribution
-    of price regimes without requiring a separate model per zone. The zones were
-    chosen to cover the main market structures: gas-indexed Central Europe (DE),
-    nuclear-heavy (FR), highly interconnected (NL, BE), solar-heavy Southern
-    Europe (ES, IT-NO), hydro-dominated Nordics (SE-SE3), and Eastern Europe (PL).
+    - The `EM_API_KEY` environment variable must be present in the local `.env` file.
+    - Dependencies: `pip install lightgbm pandas pyarrow python-dotenv`
 """
 
 import os
@@ -39,24 +23,21 @@ import pandas as pd
 from bess.data.cache import get_prices_cached
 from bess.forecast.ml import train_model, train_model_pooled, GB_MODEL_PATH, EUROPE_MODEL_PATH
 
-# ============================================================
-# Config — edit these if you want a different training window
-# ============================================================
 
 TRAIN_START = "2021-01-01"
 TRAIN_END   = "2024-12-31"
 
-GB_ZONES = ["GB"]  # GB-NIR shares the model but isn't worth extra API calls
+GB_ZONES = ["GB"]  
 
 EUROPE_ZONES = [
-    "DE",       # Germany — large, liquid, gas-indexed, strong wind
-    "FR",       # France — nuclear-heavy, lower volatility baseline
-    "NL",       # Netherlands — highly interconnected, good proxy for NW Europe
-    "ES",       # Spain — solar-heavy, different intraday shape
-    "IT-NO",    # Italy North — most liquid Italian zone, strong hydro + import mix
-    "SE-SE3",   # Sweden (Stockholm) — hydro-dominated, very different regime
-    "PL",       # Poland — coal-heavy, Eastern Europe price dynamics
-    "BE",       # Belgium — small but liquid, nuclear + interconnected
+    "DE",       # Germany: Large, liquid market; gas-indexed with strong wind penetration.
+    "FR",       # France: Nuclear-heavy; typically provides a lower-volatility baseline.
+    "NL",       # Netherlands: Highly interconnected; effective proxy for Northwest Europe.
+    "ES",       # Spain: Solar-heavy generation mix resulting in a distinct intraday profile.
+    "IT-NO",    # Italy North: Highest liquidity Italian zone; robust hydro and import mix.
+    "SE-SE3",   # Sweden (Stockholm): Hydro-dominated; operates under a distinct pricing regime.
+    "PL",       # Poland: Coal-heavy; representative of Eastern European price dynamics.
+    "BE",       # Belgium: Small but liquid; nuclear baseline with strong interconnection.
 ]
 
 
@@ -78,14 +59,15 @@ def fetch_zone(zone: str, start: str, end: str) -> pd.Series:
 
 
 def fetch_all_zones(zones: list[str], start: str, end: str) -> list[pd.Series]:
-    """
-    Fetch price series for each zone independently, returning a list of Series.
+    """Retrieves independent price series for multiple zones.
 
-    We intentionally do NOT concatenate here. Each zone's Series is passed
-    separately to train_model_pooled(), which builds features per zone before
-    pooling the feature DataFrames. Concatenating raw Series first produces
-    duplicate DatetimeIndex labels (all zones share the same timestamps) which
-    causes asfreq('h') to raise ValueError on reindex.
+    Yields a list of `pd.Series` objects. Data is intentionally NOT concatenated here.
+    Each zone's series is processed separately within `train_model_pooled()` to engineer
+    zone-specific features prior to pooling.
+    
+    Attempting to concatenate raw price series sharing identical timestamps would produce
+    duplicate DatetimeIndex labels, which causes subsequent structural operations (like `asfreq('h')`)
+    to trace a `ValueError` during re-indexing.
     """
     all_series = []
     for zone in zones:
@@ -111,7 +93,7 @@ def main():
     print("=" * 60)
 
     gb_zone_series = fetch_all_zones(GB_ZONES, TRAIN_START, TRAIN_END)
-    # Single zone — train_model is fine here; train_model_pooled works too
+    # For a single zone, the standard `train_model` interface is appropriate.
     gb_model = train_model(gb_zone_series[0])
     gb_model.save_model(GB_MODEL_PATH)
     print(f"Saved GB model → {GB_MODEL_PATH}")
@@ -123,8 +105,8 @@ def main():
     print("=" * 60)
 
     europe_zone_series = fetch_all_zones(EUROPE_ZONES, TRAIN_START, TRAIN_END)
-    # Features are built per zone inside train_model_pooled to avoid duplicate
-    # DatetimeIndex labels that would break asfreq('h') on a naively concatenated Series.
+    # Feature engineering is iteratively applied per zone internally within `train_model_pooled`.
+    # This prevents the creation of duplicate DatetimeIndex labels from naive concatenation.
     europe_model = train_model_pooled(europe_zone_series)
     europe_model.save_model(EUROPE_MODEL_PATH)
     print(f"Saved Europe model → {EUROPE_MODEL_PATH}")

@@ -4,18 +4,19 @@ from pathlib import Path
 from bess.data.em_client import get_historical_prices
 
 def get_prices_cached(zone: str, start_date: str, end_date: str, force_refresh: bool = False) -> pd.Series:
-    """
-    Retrieves historical, day-ahead prices for the given zone and date range, using 
-    a local Parquet cache to avoid redundant API calls.
-    
+    """Retrieves historical day-ahead prices for a specified zone and date range.
+
+    Utilizes a local Parquet cache to minimize redundant API calls and accelerate
+    data loading during backtesting or model training.
+
     Args:
-        zone: The zone code (e.g. 'DE').
-        start_date: Start date string in 'YYYY-MM-DD' format.
-        end_date: End date string in 'YYYY-MM-DD' format.
-        force_refresh: If True, bypasses the cache and re-fetches from the API.
-        
+        zone: The target zone identifier (e.g., 'DE', 'GB').
+        start_date: The start date in 'YYYY-MM-DD' format.
+        end_date: The end date in 'YYYY-MM-DD' format.
+        force_refresh: If True, bypasses the local cache and forces an API fetch.
+
     Returns:
-        pd.Series: Hourly prices with a UTC DatetimeIndex.
+        pd.Series: A contiguous series of hourly prices with a UTC DatetimeIndex.
     """
     data_dir = Path("data")
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -24,15 +25,16 @@ def get_prices_cached(zone: str, start_date: str, end_date: str, force_refresh: 
     
     if filename.exists() and not force_refresh:
         print(f"[cache] Loaded from disk: {filename}")
-        # pyarrow engine preserves the DatetimeIndex reliably
+        # The 'pyarrow' engine is used to reliably preserve the DatetimeIndex.
         df = pd.read_parquet(filename, engine='pyarrow')
-        # Squeeze the single-column dataframe back into a Series
+        # Squeeze the single-column DataFrame down into a Series.
         return df.squeeze("columns")
         
-    # Fetch from API
+    # Fetch remote data via the external API.
     series = get_historical_prices(zone, start_date, end_date)
     
-    # Save to parquet. Pandas to_parquet works best with DataFrames, so convert to frame.
+    # Persist the fetched data to a local Parquet file.
+    # Conversion to a DataFrame is required as `to_parquet` applies strictly to DataFrame objects.
     df = series.to_frame(name="price")
     df.to_parquet(filename, engine='pyarrow', index=True)
     
@@ -40,7 +42,7 @@ def get_prices_cached(zone: str, start_date: str, end_date: str, force_refresh: 
     return series
 
 if __name__ == "__main__":
-    # Little manual verification script
+    # Manual verification script for cache integrity testing.
     zone = "DE"
     start = "2024-01-01"
     end = "2024-01-07"

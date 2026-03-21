@@ -22,7 +22,7 @@ def load_zones():
 
 @st.cache_data
 def load_historical_prices(zone: str, start_date: str, end_date: str) -> pd.Series:
-    """Fetch and cache prices by primitive string args so Streamlit can hash them."""
+    """Retrieves and caches historical prices based on primitive string arguments for Streamlit hashing."""
     return get_prices_cached(zone, start_date, end_date)
 
 
@@ -73,9 +73,19 @@ def render_sidebar():
 
 
 def run_single_day_scenario(prices, target_date, forecast_fn, battery_params, ml_model=None):
-    """
-    Runs a single day scenario with perfect foresight (forecast_fn=None) or a forecast model.
-    The Pyomo ConcreteModel is explicitly deleted after use to prevent memory accumulation.
+    """Executes a dispatch scenario for a single day using either perfect foresight or a specified forecast model.
+
+    To mitigate memory accumulation, the Pyomo ConcreteModel instance is explicitly deleted post-execution.
+
+    Args:
+        prices: The historical price series.
+        target_date: The specific date for scenario evaluation.
+        forecast_fn: The forecasting function to apply, or None for perfect foresight.
+        battery_params: A dictionary defining battery technical specifications.
+        ml_model: An optional pre-trained ML model (required if `forecast_fn` is an ML model).
+
+    Returns:
+        Tuple[pd.DataFrame, pd.Series, float]: The computed dispatch schedule, the solved prices, and the realized profit.
     """
     m = None
     try:
@@ -100,7 +110,7 @@ def run_single_day_scenario(prices, target_date, forecast_fn, battery_params, ml
         df_dispatch["actual_price"] = actual_prices.values
         df_dispatch["forecast_price"] = solve_prices.values
 
-        # Recalculate realised profit against actual prices when using a forecast.
+        # Recalibrate realized profit against actual market prices when evaluating a predicted forecast.
         actual_revenue = (df_dispatch["p_discharge_MW"] * df_dispatch["actual_price"]).sum()
         actual_cost = (df_dispatch["p_charge_MW"] * df_dispatch["actual_price"]).sum()
         realised_profit = actual_revenue - actual_cost
@@ -112,8 +122,8 @@ def run_single_day_scenario(prices, target_date, forecast_fn, battery_params, ml
         return None, None, 0.0
 
     finally:
-        # Release the Pyomo model immediately — it holds Var/Constraint dicts in memory
-        # and won't be freed promptly by the garbage collector without an explicit del.
+        # Immediately release the Pyomo model. Memory-intensive Var/Constraint dictionaries
+        # require explicit deletion for timely garbage collection.
         if m is not None:
             del m
         gc.collect()
@@ -134,8 +144,7 @@ def main():
         target_date = st.date_input("Select Historical Date", value=pd.to_datetime("2025-03-01"))
         target_date_str = target_date.strftime("%Y-%m-%d")
 
-    # In-sample / out-of-sample warning — shown outside the columns so it
-    # spans the full width and is visible before the user clicks Run.
+    # Present an in-sample vs out-of-sample warning spanning the full application width.
     _TRAIN_END = pd.to_datetime("2024-12-31").date()
     if target_date <= _TRAIN_END:
         st.warning(
